@@ -7,6 +7,7 @@ use std::path::PathBuf;
 pub async fn download_repositories(
     client: &Client,
     token: &str,
+    organization: &str,
     repos: Vec<Repo>,
     target_dir: PathBuf,
     keyword: Option<&str>,
@@ -48,8 +49,8 @@ pub async fn download_repositories(
 
     for (index, repo) in repos_to_download.iter().enumerate() {
         let zip_url = format!(
-            "https://api.github.com/repos/WildCodeSchool/{}/zipball/{}",
-            repo.name, repo.default_branch
+            "https://api.github.com/repos/{}/{}/zipball/{}",
+            organization, repo.name, repo.default_branch
         );
 
         println!(
