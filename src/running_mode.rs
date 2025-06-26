@@ -11,17 +11,39 @@ fn get_user_input(prompt: &str) -> String {
     input.trim().to_string()
 }
 
-pub fn chose_mode() -> u8 {
+pub fn configure_search() -> Option<String> {
     println!("\n🔍 Mode de récupération :");
-    println!("  1️⃣  Filtrer par mot-clé dans le nom du repo");
-    println!("  2️⃣  Récupérer les 500 meilleurs repos (par date de push)");
+    println!("  1️⃣  Filtrer par mot-clé dans le nom du repository");
+    println!("  2️⃣  Récupérer les 500 derniers repositories (par date de push)");
 
-    loop {
+    let mode = loop {
         let choice = get_user_input("\n👉 Votre choix (1 ou 2) : ");
         match choice.as_str() {
             "1" => break 1,
             "2" => break 2,
             _ => println!("❌ Veuillez saisir 1 ou 2"),
         }
+    };
+
+    if mode == 1 {
+        println!("✅ Vous avez choisi le mode 1 : Filtrer par mot-clé");
+
+        let keyword = loop {
+            let input =
+                get_user_input("\n🔎 Mot-clé à rechercher dans les noms de repositories : ");
+            if input.trim().is_empty() {
+                println!("❌ Le mot-clé ne peut pas être vide");
+                continue;
+            }
+            break input.trim().to_lowercase();
+        };
+
+        println!("✅ Mot-clé sélectionné : '{}'", keyword);
+
+        Some(keyword)
+    } else {
+        println!("✅ Vous avez choisi le mode 2 : Récupérer les 500 derniers repositories");
+
+        None
     }
 }

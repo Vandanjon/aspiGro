@@ -1,31 +1,44 @@
 use dotenvy::dotenv;
 use std::{env, fs};
 
-pub fn load_github_token() -> Option<String> {
+fn get_env_var(var_name: &str) -> String {
+    match env::var(var_name) {
+        Ok(value) => {
+            if value.trim().is_empty() {
+                eprintln!(
+                    "Erreur : {} est vide. Vérifiez votre fichier .env.",
+                    var_name
+                );
+                std::process::exit(1);
+            } else {
+                value
+            }
+        }
+        Err(_) => {
+            eprintln!("Erreur : {} n'est pas défini.", var_name);
+            eprintln!(
+                "Assurez-vous que {} est défini dans le fichier .env.",
+                var_name
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
+pub fn load_vars() -> (String, String) {
     if !fs::metadata(".env").is_ok() {
         eprintln!("Erreur : Le fichier .env est manquant.");
         eprintln!("Assurez-vous d'avoir un fichier .env à la racine du projet.");
-        return None;
+        std::process::exit(1);
     }
 
     if let Err(e) = dotenv() {
         eprintln!("Erreur lors du chargement du fichier .env : {}", e);
-        return None;
+        std::process::exit(1);
     }
 
-    match env::var("GITHUB_TOKEN") {
-        Ok(token) => {
-            if token.trim().is_empty() {
-                eprintln!("Erreur : GITHUB_TOKEN est vide. Vérifiez votre fichier .env.");
-                None
-            } else {
-                Some(token)
-            }
-        }
-        Err(_) => {
-            eprintln!("Erreur : GITHUB_TOKEN n'est pas défini.");
-            eprintln!("Assurez-vous que la variable d'environnement GITHUB_TOKEN est définie dans le fichier .env.");
-            None
-        }
-    }
+    let github_token = get_env_var("GITHUB_TOKEN");
+    let dl_folder_path = get_env_var("DL_FOLDER_PATH");
+
+    (github_token, dl_folder_path)
 }
