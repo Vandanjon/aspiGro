@@ -13,8 +13,8 @@ fn get_user_input(prompt: &str) -> String {
 
 pub fn configure_search() -> Option<String> {
     println!("\n🔍 Mode de récupération :");
-    println!("  1️⃣  Filtrer par mot-clé dans le nom du repository");
-    println!("  2️⃣  Récupérer les 500 derniers repositories (par date de push)");
+    println!("  1️⃣  Manuel : Filtrer par mot-clé dans le nom du repository");
+    println!("  2️⃣  Auto : Récupérer les 500 derniers repositories (par date de push)");
 
     let mode = loop {
         let choice = get_user_input("\n👉 Votre choix (1 ou 2) : ");
