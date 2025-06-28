@@ -23,8 +23,9 @@ async fn main() {
     println!("4/5 Téléchargement des repos...");
     if !repos.is_empty() {
         println!("   📁 Dossier de téléchargement : {}", dl_folder_path);
-        // TODO: Implémenter le téléchargement des repos
-        // downloader::download_repositories(&repos, &dl_folder_path).await;
+        downloader::download_repositories(&repos, &dl_folder_path).await;
+    } else {
+        println!("   ⚠️  Aucun repository à télécharger");
     }
 
     println!("5/5 Terminé !");

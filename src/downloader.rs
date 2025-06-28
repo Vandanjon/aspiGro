@@ -1,128 +1,151 @@
 use crate::models::Repo;
-use reqwest::Client;
-use std::fs::File;
-use std::io::copy;
-use std::path::PathBuf;
+use futures::future::join_all;
+use std::path::Path;
+use std::process::Stdio;
+use tokio::fs;
+use tokio::time::Instant;
 
-pub async fn download_repositories(
-    client: &Client,
-    token: &str,
-    organization: &str,
-    repos: Vec<Repo>,
-    target_dir: PathBuf,
-    keyword: Option<&str>,
-) {
-    let total_repos = if keyword.is_some() {
-        repos.len()
-    } else {
-        repos.len().min(500)
-    };
+pub async fn download_repositories(repos: &[Repo], target_dir: &str) {
+    let start_time = Instant::now();
 
-    println!("\n📊 Résumé :");
-    if let Some(kw) = keyword {
-        println!("   🔍 Mot-clé : '{}'", kw);
-        println!("   📦 {} repositories trouvés correspondants", total_repos);
-    } else {
-        println!("   📦 {} repositories à télécharger (500 max)", total_repos);
+    println!("\n🚀 Téléchargement ultra-rapide avec git clone...");
+    println!("   📦 {} repositories à cloner", repos.len());
+    println!("   📁 Dossier cible : {}", target_dir);
+
+    // Créer le dossier cible s'il n'existe pas
+    if let Err(e) = fs::create_dir_all(target_dir).await {
+        eprintln!("❌ Impossible de créer le dossier {}: {}", target_dir, e);
+        return;
     }
 
-    println!("   📁 Téléchargement dans : {:?}", target_dir);
-
-    if total_repos > 10 {
-        let confirm = get_user_input(&format!(
-            "\n⚠️  Vous allez télécharger {} repositories. Continuer ? (o/N) : ",
-            total_repos
-        ));
-        if !matches!(confirm.to_lowercase().as_str(), "o" | "oui" | "y" | "yes") {
-            println!("❌ Opération annulée par l'utilisateur");
-            std::process::exit(0);
-        }
-    }
-
-    println!("\n🚀 Début du téléchargement...");
-
-    let repos_to_download: Vec<_> = if keyword.is_some() {
-        repos.into_iter().collect()
-    } else {
-        repos.into_iter().take(500).collect()
-    };
-
-    for (index, repo) in repos_to_download.iter().enumerate() {
-        let zip_url = format!(
-            "https://api.github.com/repos/{}/{}/zipball/{}",
-            organization, repo.name, repo.default_branch
-        );
-
-        println!(
-            "⬇️  [{}/{}] Téléchargement de '{}'...",
-            index + 1,
-            total_repos,
-            repo.name
-        );
-
-        let resp = client.get(&zip_url).bearer_auth(token).send().await;
-
-        let resp = match resp {
-            Ok(r) => match r.error_for_status() {
-                Ok(resp) => resp,
-                Err(e) => {
-                    eprintln!("   ❌ Erreur téléchargement '{}': {}", repo.name, e);
-                    continue;
-                }
-            },
-            Err(e) => {
-                eprintln!("   ❌ Erreur téléchargement '{}': {}", repo.name, e);
-                continue;
-            }
-        };
-
-        let out_path = target_dir.join(format!("{}.zip", repo.name));
-        let out_file = File::create(&out_path);
-
-        let mut out_file = match out_file {
-            Ok(f) => f,
-            Err(e) => {
-                eprintln!("   ❌ Impossible de créer '{:?}': {}", out_path, e);
-                continue;
-            }
-        };
-
-        let mut response_bytes = match resp.bytes().await {
-            Ok(bytes) => std::io::Cursor::new(bytes),
-            Err(e) => {
-                eprintln!("   ❌ Erreur lecture '{:?}': {}", out_path, e);
-                continue;
-            }
-        };
-
-        if let Err(e) = copy(&mut response_bytes, &mut out_file) {
-            eprintln!("   ❌ Erreur écriture '{:?}': {}", out_path, e);
-            let _ = std::fs::remove_file(&out_path);
-        } else {
-            println!("   ✅ '{}' téléchargé avec succès", repo.name);
-        }
-    }
+    // Pool de workers pour éviter de surcharger le système
+    let max_concurrent = 8; // Ajustable selon votre machine
+    let mut current_batch = 0;
+    let total_repos = repos.len();
+    let mut successful_clones = 0;
+    let mut failed_clones = 0;
 
     println!(
-        "\n🎉 Téléchargement terminé ! {} repositories traités",
-        total_repos
+        "   ⚡ Clonage par batch de {} repos en parallèle...",
+        max_concurrent
     );
 
-    if let Some(kw) = keyword {
-        println!("🔍 Filtrage appliqué : '{}'", kw);
+    // Traitement par batches pour éviter trop de processus simultanés
+    for chunk in repos.chunks(max_concurrent) {
+        current_batch += 1;
+        let batch_size = chunk.len();
+
+        println!(
+            "\n   📦 Batch {}/{} - {} repos...",
+            current_batch,
+            (total_repos + max_concurrent - 1) / max_concurrent,
+            batch_size
+        );
+
+        // Lancer tous les clones du batch en parallèle
+        let clone_futures: Vec<_> = chunk
+            .iter()
+            .enumerate()
+            .map(|(i, repo)| {
+                let target_dir_path = target_dir.to_string();
+                let repo_name = repo.name.clone();
+                let repo_url = repo.html_url.clone();
+                async move {
+                    let repo_path = Path::new(&target_dir_path).join(&repo_name);
+                    clone_repository(&repo_url, &repo_path, i + 1, batch_size).await
+                }
+            })
+            .collect();
+
+        // Attendre que tous les clones du batch se terminent
+        let results = join_all(clone_futures).await;
+
+        // Compter les succès/échecs
+        for result in results {
+            if result {
+                successful_clones += 1;
+            } else {
+                failed_clones += 1;
+            }
+        }
     }
-    println!("📁 Fichiers sauvegardés dans : {:?}", target_dir);
+
+    let duration = start_time.elapsed();
+
+    println!(
+        "\n✅ Téléchargement terminé en {:.2}s !",
+        duration.as_secs_f64()
+    );
+    println!(
+        "   ✅ {} repositories clonés avec succès",
+        successful_clones
+    );
+
+    if failed_clones > 0 {
+        println!("   ⚠️  {} échecs de clonage", failed_clones);
+    }
+
+    let repos_per_second = total_repos as f64 / duration.as_secs_f64();
+    println!(
+        "   ⚡ Vitesse moyenne : {:.1} repos/seconde",
+        repos_per_second
+    );
 }
 
-fn get_user_input(prompt: &str) -> String {
-    use std::io::{self, Write};
+async fn clone_repository(
+    clone_url: &str,
+    target_path: &Path,
+    repo_num: usize,
+    batch_size: usize,
+) -> bool {
+    // Vérifier si le repo existe déjà
+    if target_path.exists() {
+        println!(
+            "      ⏭️  {}/{} {} (déjà présent)",
+            repo_num,
+            batch_size,
+            target_path.file_name().unwrap().to_string_lossy()
+        );
+        return true;
+    }
 
-    print!("{}", prompt);
-    io::stdout().flush().unwrap();
+    // Exécuter git clone avec toutes les branches
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("clone")
+        .arg("--no-single-branch") // Important : récupère toutes les branches
+        .arg(clone_url)
+        .arg(target_path)
+        .stdout(Stdio::null()) // Réduire le bruit
+        .stderr(Stdio::null());
 
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .expect("Erreur de lecture de l'entrée");
-    input.trim().to_string()
+    match cmd.status() {
+        Ok(status) if status.success() => {
+            println!(
+                "      ✅ {}/{} {} (toutes branches)",
+                repo_num,
+                batch_size,
+                target_path.file_name().unwrap().to_string_lossy()
+            );
+            true
+        }
+        Ok(_) => {
+            println!(
+                "      ❌ {}/{} {} (échec git clone)",
+                repo_num,
+                batch_size,
+                target_path.file_name().unwrap().to_string_lossy()
+            );
+            false
+        }
+        Err(e) => {
+            println!(
+                "      ❌ {}/{} {} (erreur: {})",
+                repo_num,
+                batch_size,
+                target_path.file_name().unwrap().to_string_lossy(),
+                e
+            );
+            false
+        }
+    }
 }
