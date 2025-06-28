@@ -1,5 +1,5 @@
 use crate::modules::{downloader, load_env, repo_fetcher, running_mode};
-use crate::utils::ui;
+use crate::utils::{errors::Result, ui};
 
 pub struct App {
     progress: ui::ProgressTracker,
@@ -12,13 +12,13 @@ impl App {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self) -> Result<()> {
         ui::print_header();
 
         // Étape 1: Chargement environnement
         self.progress
             .start_step("Chargement des variables d'environnement");
-        let (github_token, dl_folder_path, organization, var_count) = load_env::load_vars();
+        let (github_token, dl_folder_path, organization, var_count) = load_env::load_vars()?;
         self.progress.complete_step(
             "Chargement des variables d'environnement",
             &format!("{} variables chargées", var_count),

@@ -1,39 +1,30 @@
+use crate::utils::errors::{AppError, Result};
 use dotenvy::dotenv;
-use std::{env, fs, process};
+use std::{env, fs};
 
-/// Récupère une variable d'environnement ou termine le programme
-fn get_env_var(var_name: &str) -> String {
+/// Récupère une variable d'environnement ou retourne une erreur
+fn get_env_var(var_name: &str) -> Result<String> {
     env::var(var_name)
-        .map_err(|_| format!("❌ {} non défini dans .env", var_name))
+        .map_err(|_| AppError::EnvError(format!("{} non défini dans .env", var_name)))
         .and_then(|val| {
             if val.trim().is_empty() {
-                Err(format!("❌ {} vide dans .env", var_name))
+                Err(AppError::EnvError(format!("{} vide dans .env", var_name)))
             } else {
                 Ok(val)
             }
         })
-        .unwrap_or_else(|msg| {
-            eprintln!("{}", msg);
-            process::exit(1);
-        })
 }
 
 /// Expansion du tilde (~) vers le répertoire HOME
-fn expand_tilde(path: &str) -> String {
+fn expand_tilde(path: &str) -> Result<String> {
     if path.starts_with("~/") {
         env::var("HOME")
             .map(|home| path.replacen("~", &home, 1))
-            .unwrap_or_else(|_| {
-                eprintln!("❌ Variable HOME introuvable");
-                process::exit(1);
-            })
+            .map_err(|_| AppError::EnvError("Variable HOME introuvable".to_string()))
     } else if path == "~" {
-        env::var("HOME").unwrap_or_else(|_| {
-            eprintln!("❌ Variable HOME introuvable");
-            process::exit(1);
-        })
+        env::var("HOME").map_err(|_| AppError::EnvError("Variable HOME introuvable".to_string()))
     } else {
-        path.to_string()
+        Ok(path.to_string())
     }
 }
 
@@ -51,22 +42,19 @@ fn count_env_variables() -> usize {
     }
 }
 
-pub fn load_vars() -> (String, String, String, usize) {
+pub fn load_vars() -> Result<(String, String, String, usize)> {
     if fs::metadata(".env").is_err() {
-        eprintln!("❌ Fichier .env manquant");
-        eprintln!("Créez un .env avec : GITHUB_TOKEN, DL_FOLDER_PATH, ORGANIZATION_TO_FETCH");
-        process::exit(1);
+        return Err(AppError::EnvError(
+            "Fichier .env manquant. Créez un .env avec : GITHUB_TOKEN, DL_FOLDER_PATH, ORGANIZATION_TO_FETCH".to_string()
+        ));
     }
 
-    dotenv().unwrap_or_else(|e| {
-        eprintln!("❌ Erreur chargement .env : {}", e);
-        process::exit(1);
-    });
+    dotenv().map_err(|e| AppError::EnvError(format!("Erreur chargement .env : {}", e)))?;
 
-    let token = get_env_var("GITHUB_TOKEN");
-    let path = expand_tilde(&get_env_var("DL_FOLDER_PATH"));
-    let org = get_env_var("ORGANIZATION_TO_FETCH");
+    let token = get_env_var("GITHUB_TOKEN")?;
+    let path = expand_tilde(&get_env_var("DL_FOLDER_PATH")?)?;
+    let org = get_env_var("ORGANIZATION_TO_FETCH")?;
     let var_count = count_env_variables();
 
-    (token, path, org, var_count)
+    Ok((token, path, org, var_count))
 }

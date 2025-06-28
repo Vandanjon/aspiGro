@@ -26,7 +26,7 @@ pub async fn download_repositories(repos: &[Repo], target_dir: &str) {
             let url = repo.html_url.clone();
             let counter_clone = counter.clone();
             async move {
-                let result = clone_repo(&url, &path).await;
+                let result = clone_repo_with_fallback(&url, &path).await;
                 counter_clone.fetch_add(1, Ordering::Relaxed);
                 result
             }
@@ -45,11 +45,68 @@ async fn clone_repo(url: &str, path: &str) -> bool {
         return true;
     }
 
-    std::process::Command::new("git")
-        .args(["clone", "--no-single-branch", url, path])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    // Configuration Git pour éviter les prompts de mot de passe
+    let mut cmd = std::process::Command::new("git");
+    cmd.args([
+        "clone",
+        "--no-single-branch",
+        "--quiet",
+        "--no-checkout",
+        url,
+        path,
+    ])
+    .env("GIT_TERMINAL_PROMPT", "0")
+    .env("GIT_ASKPASS", "true")
+    .env("SSH_ASKPASS", "true")
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+
+    // Timeout de 30 secondes pour éviter les blocages
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        tokio::task::spawn_blocking(move || cmd.status().map(|s| s.success()).unwrap_or(false)),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(success)) => {
+            if success {
+                std::process::Command::new("git")
+                    .args(["-C", path, "checkout", "HEAD"])
+                    .env("GIT_TERMINAL_PROMPT", "0")
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false)
+            } else {
+                false
+            }
+        }
+        _ => false, // Timeout ou erreur
+    }
+}
+
+/// Tente de cloner un repo avec différentes méthodes si nécessaire
+async fn clone_repo_with_fallback(url: &str, path: &str) -> bool {
+    if clone_repo(url, path).await {
+        return true;
+    }
+
+    if url.starts_with("git@github.com:") {
+        let https_url = url
+            .replace("git@github.com:", "https://github.com/")
+            .replace(".git", "");
+        let https_url = if !https_url.ends_with(".git") {
+            format!("{}.git", https_url)
+        } else {
+            https_url
+        };
+
+        if clone_repo(&https_url, path).await {
+            return true;
+        }
+    }
+
+    false
 }
