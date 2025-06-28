@@ -1,3 +1,4 @@
+use crate::http_client;
 use crate::models::Repo;
 use futures::future::join_all;
 use reqwest::Client;
@@ -248,4 +249,41 @@ async fn fetch_page(
         .map_err(|e| format!("Parse JSON échoué: {}", e))?;
 
     Ok(repos)
+}
+
+/// Point d'entrée principal : scan et affichage des résultats
+pub async fn scan_and_fetch(token: &str, organization: &str, keyword: Option<String>) -> Vec<Repo> {
+    let client = http_client::create_http_client();
+    let repos = fetch_repositories(&client, token, organization, keyword.as_deref()).await;
+
+    // Affichage optimisé selon le mode
+    display_results(&repos, keyword.as_deref());
+    repos
+}
+
+/// Affichage intelligent des résultats
+fn display_results(repos: &[Repo], keyword: Option<&str>) {
+    match keyword {
+        Some(kw) => {
+            println!("   🔍 {} repositories avec '{}'", repos.len(), kw);
+            if !repos.is_empty() {
+                repos.iter().enumerate().for_each(|(i, repo)| {
+                    println!("      {}. {} - {}", i + 1, repo.name, repo.html_url);
+                });
+            }
+        }
+        None => {
+            println!("   📦 {} repositories (triés par activité)", repos.len());
+            if repos.len() > 10 {
+                repos.iter().take(10).enumerate().for_each(|(i, repo)| {
+                    println!("      {}. {} - {}", i + 1, repo.name, repo.html_url);
+                });
+                println!("      ... et {} autres", repos.len() - 10);
+            } else {
+                repos.iter().enumerate().for_each(|(i, repo)| {
+                    println!("      {}. {} - {}", i + 1, repo.name, repo.html_url);
+                });
+            }
+        }
+    }
 }

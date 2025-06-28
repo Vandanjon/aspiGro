@@ -4,7 +4,6 @@ mod http_client;
 mod load_env;
 mod models;
 mod repo_fetcher;
-mod repo_scanner;
 mod running_mode;
 
 #[tokio::main]
@@ -18,7 +17,7 @@ async fn main() {
     let keyword = running_mode::configure_search();
 
     println!("3/5 Scan des repos de l'organisation...");
-    let repos = repo_scanner::scan_repositories(&github_token, &organization, keyword).await;
+    let repos = repo_fetcher::scan_and_fetch(&github_token, &organization, keyword).await;
 
     println!("4/5 Téléchargement des repos...");
     if !repos.is_empty() {
