@@ -9,3 +9,16 @@
 5. Sélectionner "Public repositories" dans la section "Repository access".
 6. Cliquer sur "Generate token" et copier le token généré.
 7. Coller le token dans le fichier `.env` à la racine du projet.
+
+# Utilisation
+
+1. Clonez le dépôt.
+2. Construisez l'application avec `cargo build --release`.
+3. Créez un fichier `.env` dans le dossier où se trouve l'application.
+4. Remplissez le `.env` :
+   ```
+   GITHUB_TOKEN=your_token_here
+   DL_FOLDER_PATH=/path/to/download/folder
+   ORGANIZATION_TO_FETCH=your_organization
+   ```
+5. Exécutez l'application depuis un terminal.
