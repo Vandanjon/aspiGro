@@ -1,10 +1,8 @@
-use crate::http_client;
-use crate::models::Repo;
+use crate::modules::http_client;
+use crate::utils::models::Repo;
 use futures::future::join_all;
 use reqwest::Client;
 use serde::Deserialize;
-use std::io::{self, Write};
-use tokio::time::Instant;
 
 #[derive(Deserialize)]
 struct SearchResponse {
@@ -30,24 +28,16 @@ async fn fetch_repositories_by_search(
     organization: &str,
     keyword: &str,
 ) -> Vec<Repo> {
-    let start_time = Instant::now();
-    println!("\n🔍 Recherche par mot-clé avec l'API Search GitHub...");
-
-    // L'API Search GitHub permet jusqu'à 1000 résultats (10 pages * 100 items)
     let max_pages = 10;
-    let concurrent_requests = 5; // Plus agressif pour l'API search
-
+    let concurrent_requests = 5;
     let mut all_repos = Vec::new();
 
     // Première requête pour obtenir le total
     let first_result = search_repositories_page(client, token, organization, keyword, 1).await;
     match first_result {
         Ok((repos, total_count)) => {
-            println!("   📊 {} repositories trouvés au total", total_count);
             all_repos.extend(repos);
-
             let total_pages = ((total_count as f64 / 100.0).ceil() as usize).min(max_pages);
-            println!("   📄 Récupération sur {} pages...", total_pages);
 
             // Récupération des pages restantes en parallèle
             if total_pages > 1 {
@@ -68,17 +58,12 @@ async fn fetch_repositories_by_search(
 
                     let results = join_all(futures).await;
 
-                    for (i, result) in results.into_iter().enumerate() {
-                        let page_num = page_range[i];
+                    for result in results.into_iter() {
                         match result {
                             Ok((repos, _)) => {
                                 all_repos.extend(repos);
-                                print!("🔍{} ", page_num);
-                                io::stdout().flush().unwrap();
                             }
-                            Err(e) => {
-                                eprintln!("\n❌ Erreur page {}: {}", page_num, e);
-                            }
+                            Err(_) => {}
                         }
                     }
 
@@ -86,19 +71,10 @@ async fn fetch_repositories_by_search(
                 }
             }
         }
-        Err(e) => {
-            eprintln!("❌ Erreur lors de la recherche: {}", e);
+        Err(_) => {
             return Vec::new();
         }
     }
-
-    let duration = start_time.elapsed();
-    println!(
-        "\n✅ {} repos trouvés avec '{}' en {:.2}s",
-        all_repos.len(),
-        keyword,
-        duration.as_secs_f64()
-    );
 
     all_repos
 }
@@ -108,13 +84,8 @@ async fn fetch_repositories_by_pagination(
     token: &str,
     organization: &str,
 ) -> Vec<Repo> {
-    let start_time = Instant::now();
-    println!("\n📦 Récupération exhaustive des repositories de l'organisation...");
-
-    // Mode plus agressif pour la récupération exhaustive
-    let max_pages = 20; // Augmenté pour plus d'exhaustivité
-    let concurrent_requests = 6; // Plus agressif
-
+    let max_pages = 20;
+    let concurrent_requests = 6;
     let mut all_repos = Vec::new();
     let mut current_page = 1;
 
@@ -128,34 +99,24 @@ async fn fetch_repositories_by_pagination(
             .collect();
 
         let results = join_all(futures).await;
-
         let mut page_empty = false;
         let mut batch_repos = Vec::new();
 
-        for (i, result) in results.into_iter().enumerate() {
-            let page_num = page_range[i];
+        for result in results.into_iter() {
             match result {
                 Ok(repos) => {
                     if repos.is_empty() {
-                        println!("   📄 Page {} vide - arrêt", page_num);
                         page_empty = true;
                         break;
                     }
-
                     batch_repos.extend(repos);
-                    print!("📄{} ", page_num);
-                    io::stdout().flush().unwrap();
                 }
-                Err(e) => {
-                    eprintln!("\n❌ Erreur page {}: {}", page_num, e);
-                    continue;
-                }
+                Err(_) => continue,
             }
         }
 
         all_repos.extend(batch_repos);
 
-        // Arrêt si page vide ou si on a atteint la limite souhaitée
         if page_empty {
             break;
         }
@@ -163,27 +124,7 @@ async fn fetch_repositories_by_pagination(
         current_page += pages_to_fetch;
     }
 
-    let duration = start_time.elapsed();
-    println!(
-        "\n✅ {} repos récupérés en {:.2}s",
-        all_repos.len(),
-        duration.as_secs_f64()
-    );
-
-    if all_repos.is_empty() {
-        println!(
-            "❌ Aucun repository trouvé pour l'organisation '{}'",
-            organization
-        );
-        std::process::exit(1);
-    }
-
-    // Limiter à 500 pour le mode brute force
     if all_repos.len() > 500 {
-        println!(
-            "   ⚠️  Limitation à 500 repositories (sur {} trouvés)",
-            all_repos.len()
-        );
         all_repos.truncate(500);
     }
 
@@ -256,34 +197,6 @@ pub async fn scan_and_fetch(token: &str, organization: &str, keyword: Option<Str
     let client = http_client::create_http_client();
     let repos = fetch_repositories(&client, token, organization, keyword.as_deref()).await;
 
-    // Affichage optimisé selon le mode
-    display_results(&repos, keyword.as_deref());
+    // Pas d'affichage détaillé ici - juste le retour des résultats
     repos
-}
-
-/// Affichage intelligent des résultats
-fn display_results(repos: &[Repo], keyword: Option<&str>) {
-    match keyword {
-        Some(kw) => {
-            println!("   🔍 {} repositories avec '{}'", repos.len(), kw);
-            if !repos.is_empty() {
-                repos.iter().enumerate().for_each(|(i, repo)| {
-                    println!("      {}. {} - {}", i + 1, repo.name, repo.html_url);
-                });
-            }
-        }
-        None => {
-            println!("   📦 {} repositories (triés par activité)", repos.len());
-            if repos.len() > 10 {
-                repos.iter().take(10).enumerate().for_each(|(i, repo)| {
-                    println!("      {}. {} - {}", i + 1, repo.name, repo.html_url);
-                });
-                println!("      ... et {} autres", repos.len() - 10);
-            } else {
-                repos.iter().enumerate().for_each(|(i, repo)| {
-                    println!("      {}. {} - {}", i + 1, repo.name, repo.html_url);
-                });
-            }
-        }
-    }
 }

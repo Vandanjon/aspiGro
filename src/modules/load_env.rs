@@ -37,8 +37,21 @@ fn expand_tilde(path: &str) -> String {
     }
 }
 
-pub fn load_vars() -> (String, String, String) {
-    // Vérification existence .env
+/// Compte le nombre de variables dans .env.sample
+fn count_env_variables() -> usize {
+    match fs::read_to_string(".env.sample") {
+        Ok(content) => content
+            .lines()
+            .filter(|line| {
+                let trimmed = line.trim();
+                !trimmed.is_empty() && !trimmed.starts_with('#') && trimmed.contains('=')
+            })
+            .count(),
+        Err(_) => 3, // Valeur par défaut si .env.sample n'existe pas
+    }
+}
+
+pub fn load_vars() -> (String, String, String, usize) {
     if fs::metadata(".env").is_err() {
         eprintln!("❌ Fichier .env manquant");
         eprintln!("Créez un .env avec : GITHUB_TOKEN, DL_FOLDER_PATH, ORGANIZATION_TO_FETCH");
@@ -53,6 +66,7 @@ pub fn load_vars() -> (String, String, String) {
     let token = get_env_var("GITHUB_TOKEN");
     let path = expand_tilde(&get_env_var("DL_FOLDER_PATH"));
     let org = get_env_var("ORGANIZATION_TO_FETCH");
+    let var_count = count_env_variables();
 
-    (token, path, org)
+    (token, path, org, var_count)
 }
